@@ -31,18 +31,18 @@ export default function Home() {
         body: JSON.stringify({ message: userMessage.content, thread_id: null, stream_tokens: true }),
       })
       const reader = resp.body?.getReader()
-      const decoder = new TextDecoder()
+      const decoder = new TextDecoder() // ⑥ 流式解码器
 
-      while (reader) {
+      while (reader) { // ⑦ 循环读取流
         const { done, value } = await reader.read()
         if (done) break
         const text = decoder.decode(value, { stream: true }) // ⑥ 流式解码
         for (const part of text.split("\n\n")) {
           if (!part.startsWith("data:")) continue
-          const data = JSON.parse(part.slice(5))
+          const data = JSON.parse(part.slice(6))
           if (data.type === "token") {
             setMessages(prev => {
-              // ⑦ 函数式更新:追加到 AI 消息
+              // 函数式更新:追加到 AI 消息
               const newMsgs = [...prev]
               const last = newMsgs[newMsgs.length - 1]
               newMsgs[newMsgs.length - 1] = { ...last, content: last.content + data.content }
