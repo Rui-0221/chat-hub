@@ -7,6 +7,16 @@ import json
 import asyncio
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel # 导入BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # 允许的源，可以根据需要修改
+    allow_credentials=True,# 允许携带cookie
+    allow_methods=["*"],  # 允许所有方法
+    allow_headers=["*"],  # 允许所有头部
+)
 
 class UserInput(BaseModel):
     """用户发来的聊天请求"""
@@ -28,7 +38,6 @@ graph_builder.add_edge(START, "model")  #3，注册边（传送带：入口->mod
 graph_builder.add_edge("model", END) #4，注册边（传送带：model工位->出口：从model到END
 graph = graph_builder.compile() #5，编译成可执行图
 
-app = FastAPI() # 实例化FastAPI应用
 
 @app.get("/hello")
 async def hello():
