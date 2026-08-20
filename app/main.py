@@ -6,12 +6,18 @@ from langgraph.graph import StateGraph,MessagesState,START,END
 import json
 import asyncio
 from fastapi.responses import StreamingResponse
-from fastapi.responses import HTMLResponse
+from pydantic import BaseModel # 导入BaseModel
 
-load_dotenv()
+class UserInput(BaseModel):
+    """用户发来的聊天请求"""
+    message: str
+    thread_id: str | None = None  # 可选字段，会话id,默认为None,表示消息所属的线程ID
+    stream_tokens: bool =True  # 可选字段，默认为True，表示是否流式输出token
 
-model =ChatDeepSeek(model="deepseek-chat")
-async def call_model(state:MessagesState)->dict:
+load_dotenv() # 加载环境变量
+
+model =ChatDeepSeek(model="deepseek-chat") # 实例化模型
+async def call_model(state:MessagesState)->dict: # 定义模型节点的处理函数
     """模型节点：读状态里的消息->调用模型->把回答写入状态"""
     responese = await model.ainvoke(state["messages"])
     return {"messages": [responese]}
@@ -22,7 +28,7 @@ graph_builder.add_edge(START, "model")  #3，注册边（传送带：入口->mod
 graph_builder.add_edge("model", END) #4，注册边（传送带：model工位->出口：从model到END
 graph = graph_builder.compile() #5，编译成可执行图
 
-app = FastAPI()
+app = FastAPI() # 实例化FastAPI应用
 
 @app.get("/hello")
 async def hello():
@@ -43,6 +49,7 @@ async def sse_demo():
     return StreamingResponse(fake_stream(), media_type="text/event-stream")
 
 # SSE示例：调用图生成消息流
+"""
 @app.get("/chat/stream")
 async def chat_steam(message: str):
     async def event_gen(): # 定义异步生成器函数
@@ -54,43 +61,20 @@ async def chat_steam(message: str):
             if isinstance(content,str) and content: #跳过空消息
                 yield f"data: {json.dumps({'content':content})}\n\n" # 按SSE格式输出消息
     return StreamingResponse(event_gen(), media_type="text/event-stream")
-
-
-PAGE = r"""<!DOCTYPE html>
-<html>
-<head>
-    <title>SSE Demo</title>
-</head>
-<body>
-    <h3>SSE Demo</h3>
-    <button onclick="runDemo('/sse-demo')">假数据流</button>
-    <div id="out" style="white-space:pre-wrap;font-size:24px"></div>
-    <input id="q" value="给我讲个笑话" style="width:300px">
-    <button onclick="runDemo('/chat/stream?message=' + encodeURIComponent(document.getElementById('q').value))">真实 DeepSeek 流</button>
-    <script>
-        async function runDemo(url) {
-            const out=document.getElementById("out");
-            out.textContent=""; //清空输出
-            const resp=await fetch(url); //发起请求
-            const reader=resp.body.getReader(); //获取流读取器
-            const decoder=new TextDecoder("utf-8");
-            while(true){
-                const {done,value}=await reader.read(); //读取流
-                if(done) break; //流结束
-                const text=decoder.decode(value); //解码
-                for(const part of text.split("\n\n")){ //按行处理
-                    if(!part.startsWith("data:")) continue; //只处理data行
-                    const payload=JSON.parse(part.slice(5)); //解析json
-                    out.textContent+=payload.content; //输出内容
-                    }
-                }
-            }
-    </script>
-</body>
-</html>
 """
 
-@app.get("/sse-demo-page",response_class=HTMLResponse)
-async def sse_demo_page():
-    return PAGE
+@app.post("/chat/stream")
+async def chat_stream(user_input: UserInput):
+    async def event_gen():
+        async for chunk, metadata in graph.astream(
+            {"messages": [HumanMessage(content=user_input.message)]},
+            stream_mode="messages",
+        ):
+            content=chunk.content
+            if isinstance(content,str) and content:
+                yield f"data: {json.dumps({'type': 'token', 'content':content},ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'end'})}\n\n" 
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
 
