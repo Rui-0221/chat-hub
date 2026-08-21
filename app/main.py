@@ -8,8 +8,17 @@ import asyncio
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel # 导入BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from db import create_db_and_tables
+from employee_router import employee_router
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app:FastAPI):
+    """应用启动时自动执行一次：自动建表（不存在才会自动建表）"""
+    await create_db_and_tables()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],  # 允许的源，可以根据需要修改
@@ -17,6 +26,7 @@ app.add_middleware(
     allow_methods=["*"],  # 允许所有方法
     allow_headers=["*"],  # 允许所有头部
 )
+app.include_router(employee_router)# 挂上员工接口
 
 class UserInput(BaseModel):
     """用户发来的聊天请求"""
