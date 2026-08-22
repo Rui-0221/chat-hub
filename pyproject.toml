@@ -6,8 +6,12 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
+    "chromadb>=1.5.9",
     "fastapi>=0.141.1",
+    "langchain-chroma>=1.1.0",
     "langchain-deepseek>=1.1.0",
+    "langchain-ollama>=1.1.0",
+    "langchain-text-splitters>=1.1.2",
     "langgraph>=1.2.11",
     "python-dotenv>=1.2.3",
     "sqlmodel>=0.0.39",

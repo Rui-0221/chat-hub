@@ -14,3 +14,4 @@ wheels/
 
 # Local database files
 chat.db
+chroma_db/

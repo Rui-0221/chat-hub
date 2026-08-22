@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from langchain_deepseek import ChatDeepSeek
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
+from langchain_core.messages import SystemMessage 
 from langgraph.graph import StateGraph,MessagesState,START,END
 import json
 import asyncio
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from db import create_db_and_tables
 from employee_router import employee_router
+from rag import handbook_store
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -95,5 +97,26 @@ async def chat_stream(user_input: UserInput):
         yield f"data: {json.dumps({'type': 'end'})}\n\n" 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
+@app.post("/kb/chat")
+async def kb_chat(user_input:UserInput):
+    async def event_gen():
+        # ---第一步：检索----
+        docs =handbook_store.similarity_search(user_input.message,k=3)
+        context = "\n\n".join(doc.page_content for doc in docs)
+
+        # 第二步：增强（提示词只准提供依据资料，防编造--rag的核心）
+        system=SystemMessage(content=(
+            "你是公司的OA助手。用户的问题只能依据下面公司的资料回答；"
+            "资料中没有的，明确说明“公司手册上没有相关信息”，不要编造。\n\n"
+            f"【资料】\n{context}"
+        ))
+
+        # 第三步：生成（复用之前的流式写法）
+        async for chunk in model.astream([system,HumanMessage(content=user_input.message)]):
+            content =chunk.content
+            if isinstance(content,str) and content:
+                yield f"data:{json.dumps({'type':'token','content':content},ensure_ascii=False)}\n\n"
+        yield f"data:{json.dumps({'type':'end'})}\n\n"
+    return StreamingResponse(event_gen(),media_type="text/event-stream")
 
 
