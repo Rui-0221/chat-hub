@@ -16,6 +16,8 @@ from rag import handbook_store
 from langgraph.prebuilt import ToolNode # 现成的"执行工具"工位
 from langchain_core.messages import AIMessageChunk # 过滤器用
 from tools import get_employee_info,search_handbook
+from uuid import uuid4
+from langgraph.checkpoint.memory import MemorySaver
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -51,7 +53,7 @@ graph_builder=StateGraph(MessagesState) #1,定义”图：，状态=消息列表
 graph_builder.add_node("model", call_model) #2，注册工位：取名“model”，干活函数=call_model
 graph_builder.add_edge(START, "model")  #3，注册边（传送带：入口->model工位：从START到model
 graph_builder.add_edge("model", END) #4，注册边（传送带：model工位->出口：从model到END
-graph = graph_builder.compile() #5，编译成可执行图
+graph = graph_builder.compile(checkpointer=MemorySaver()) #5，编译成可执行图(给图挂上记忆抽屉柜)
 
 # ----带工具的agent(第二个图)----
 agent_model = model.bind_tools([get_employee_info,search_handbook])
@@ -74,7 +76,7 @@ agent_builder.add_node("tools",ToolNode(tools=[get_employee_info,search_handbook
 agent_builder.add_edge(START,"agent")
 agent_builder.add_conditional_edges("agent",needs_tool,{"tools":"tools",END:END}) # 走哪条路（进入哪个节点）裁判说了算
 agent_builder.add_edge("tools","agent") # 工具跑完回到模型（循环的关键）
-agent_graph =agent_builder.compile()
+agent_graph =agent_builder.compile(checkpointer=MemorySaver()) # 给图挂上记忆抽屉柜
 
 @app.get("/hello")
 async def hello():
@@ -111,10 +113,12 @@ async def chat_steam(message: str):
 
 @app.post("/chat/stream")
 async def chat_stream(user_input: UserInput):
+    config = {"configurable":{"thread_id":user_input.thread_id or str(uuid4())}}
     async def event_gen():
         async for chunk, metadata in graph.astream(
             {"messages": [HumanMessage(content=user_input.message)]},
             stream_mode="messages",
+            config=config,
         ):
             content=chunk.content
             if isinstance(content,str) and content:
@@ -147,9 +151,11 @@ async def kb_chat(user_input:UserInput):
 @app.post("/agent/chat")
 async def agent_chat(user_input:UserInput):
     async def event_gen():
+        config = {"configurable":{"thread_id":user_input.thread_id or str(uuid4())}}
         async for chunk,metadata in agent_graph.astream(
             {"messages":[HumanMessage(content=user_input.message)]},
-            stream_mode="messages"
+            stream_mode="messages",
+            config=config, 
         ):
             # 流里混着两种信息：模型的话（AIMessagechunk)和工具的执行结果（ToolMessage)
             # 只把模型的话转发给用户
