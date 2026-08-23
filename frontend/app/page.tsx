@@ -1,6 +1,6 @@
 'use client' // ① 必须有:启用 useState 的组件必须是"客户端组件"
 
-import { useState } from "react" // ② useState = 状态钩子
+import { useEffect, useState } from "react" // ② useState/useEffect = 状态/副作用钩子
 
 // ③ 定义一条消息的形状(类型)
 interface ChatMessage {
@@ -14,6 +14,16 @@ export default function Home() {
   const [input, setInput] = useState("")
   const [isStreaming, setIsStreaming] = useState(false)
   const [threadId, setThreadId] = useState(() => crypto.randomUUID()) // 会话号：换了号就是换了一个"抽屉"
+  const [agents, setAgents] = useState<{ key: string; description: string }[]>([]) // 智能体名录
+  const [agentId, setAgentId] = useState("oa-assistant") // 当前选择的智能体
+
+  // ⑤ 页面加载时去前台(后端)拿"名片"列表
+  useEffect(() => {
+    fetch("/api/agents")
+      .then(r => r.json())
+      .then(data => setAgents(data))
+      .catch(() => {}) // 名录拿不到不阻塞聊天, 默认用 oa-assistant
+  }, [])
 
   // ⑤ 发送处理函数:发请求 → 读流 → 逐字渲染
   async function handleSend() {
@@ -29,7 +39,7 @@ export default function Home() {
       const resp = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage.content, thread_id: threadId, stream_tokens: true }),
+        body: JSON.stringify({ message: userMessage.content, thread_id: threadId, stream_tokens: true, agent_id: agentId }),
       })
       const reader = resp.body?.getReader()
       const decoder = new TextDecoder() // ⑥ 流式解码器
@@ -75,7 +85,23 @@ export default function Home() {
 
   return (
     <div style={{ maxWidth: 600, margin: "0 auto", padding: 20 }}>
-      <h1>AI Chat <button onClick={() => { setMessages([]); setThreadId(crypto.randomUUID()) }}>新对话</button></h1>
+      <h1>
+        AI Chat
+        {" "}
+        <select
+          value={agentId}
+          onChange={e => {
+            setAgentId(e.target.value)
+            setMessages([])                 // 换医生=重挂新号: 清空对话 + 换新会话号
+            setThreadId(crypto.randomUUID())
+          }}
+        >
+          {agents.map(a => (
+            <option key={a.key} value={a.key}>{a.description}</option>
+          ))}
+        </select>
+        <button onClick={() => { setMessages([]); setThreadId(crypto.randomUUID()) }}>新对话</button>
+      </h1>
       <div style={{ minHeight: 300, border: "1px solid #ddd", padding: 10, marginBottom: 10 }}>
         {messages.map((m, i) => (
           <div key={i}>
