@@ -14,8 +14,9 @@ from db import create_db_and_tables
 from employee_router import employee_router
 from rag import handbook_store
 from langgraph.prebuilt import ToolNode # 现成的"执行工具"工位
-from langchain_core.messages import AIMessageChunk # 过滤器用
+from langchain_core.messages import AIMessage, AIMessageChunk # 过滤器用
 from tools import get_employee_info,search_handbook
+from multi_agent import supervisor_agent
 from uuid import uuid4
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -165,4 +166,27 @@ async def agent_chat(user_input:UserInput):
                     yield f"data:{json.dumps({'type':'token','content':content},ensure_ascii=False)}\n\n"
         yield f"data:{json.dumps({'type':'end'})}\n\n"
     return StreamingResponse(event_gen(),media_type="text/event-stream")
+
+
+@app.post("/multi-agent/chat")
+async def multi_agent_chat(user_input: UserInput):
+    async def event_gen():
+        config = {"configurable": {"thread_id": user_input.thread_id or str(uuid4())}}
+        async for event, metadata in supervisor_agent.astream(
+            {"messages": [HumanMessage(content=user_input.message)]},
+            stream_mode="messages",
+            config=config,
+        ):
+            # 本版本组合下,messages 流给的是"每个节点一条完整消息"(AIMessage,非逐字chunk),
+            # 所以过滤方式: ① 只认模型产出的消息 ② 只认"主管节点"说的那条(诊所内部不进用户耳朵)
+            if not isinstance(event, (AIMessage, AIMessageChunk)):
+                continue
+            if metadata.get("langgraph_node") != "supervisor":
+                continue
+            content = event.content
+            if isinstance(content, str) and content:
+                yield f"data:{json.dumps({'type':'token','content':content},ensure_ascii=False)}\n\n"
+        yield f"data:{json.dumps({'type':'end'})}\n\n"
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+
         
