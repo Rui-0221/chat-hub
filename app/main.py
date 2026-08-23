@@ -13,6 +13,9 @@ from contextlib import asynccontextmanager
 from db import create_db_and_tables
 from employee_router import employee_router
 from rag import handbook_store
+from langgraph.prebuilt import ToolNode # 现成的"执行工具"工位
+from langchain_core.messages import AIMessageChunk # 过滤器用
+from tools import get_employee_info,search_handbook
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -50,6 +53,28 @@ graph_builder.add_edge(START, "model")  #3，注册边（传送带：入口->mod
 graph_builder.add_edge("model", END) #4，注册边（传送带：model工位->出口：从model到END
 graph = graph_builder.compile() #5，编译成可执行图
 
+# ----带工具的agent(第二个图)----
+agent_model = model.bind_tools([get_employee_info,search_handbook])
+
+async def call_agent(state:MessagesState)->dict:
+    """agent 节点：和call_model一样，但用的模型绑定了工具"""
+    response = await agent_model.ainvoke(state["messages"])
+    return {"messages":[response]}
+
+def needs_tool(state:MessagesState)->str:
+    """裁判：模型最后一条消息里有没有申请使用工具（tool_calls)"""
+    last = state["messages"][-1]
+    if last.tool_calls:
+        return "tools"
+    return END # 没有申请使用工具->显示最终答案
+
+agent_builder = StateGraph(MessagesState)
+agent_builder.add_node("agent",call_agent) #模型（雇员）工位
+agent_builder.add_node("tools",ToolNode(tools=[get_employee_info,search_handbook])) #工具工位
+agent_builder.add_edge(START,"agent")
+agent_builder.add_conditional_edges("agent",needs_tool,{"tools":"tools",END:END}) # 走哪条路（进入哪个节点）裁判说了算
+agent_builder.add_edge("tools","agent") # 工具跑完回到模型（循环的关键）
+agent_graph =agent_builder.compile()
 
 @app.get("/hello")
 async def hello():
@@ -119,4 +144,19 @@ async def kb_chat(user_input:UserInput):
         yield f"data:{json.dumps({'type':'end'})}\n\n"
     return StreamingResponse(event_gen(),media_type="text/event-stream")
 
-
+@app.post("/agent/chat")
+async def agent_chat(user_input:UserInput):
+    async def event_gen():
+        async for chunk,metadata in agent_graph.astream(
+            {"messages":[HumanMessage(content=user_input.message)]},
+            stream_mode="messages"
+        ):
+            # 流里混着两种信息：模型的话（AIMessagechunk)和工具的执行结果（ToolMessage)
+            # 只把模型的话转发给用户
+            if isinstance(chunk,AIMessageChunk):
+                content =chunk.content
+                if isinstance(content,str) and content:
+                    yield f"data:{json.dumps({'type':'token','content':content},ensure_ascii=False)}\n\n"
+        yield f"data:{json.dumps({'type':'end'})}\n\n"
+    return StreamingResponse(event_gen(),media_type="text/event-stream")
+        

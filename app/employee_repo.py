@@ -20,3 +20,8 @@ class EmployeeRepository:
     async def get_employee_by_id(cls ,session:AsyncSession,employee_id:int)->Employee | None:
         result = await session.execute(select(Employee).where(Employee.id==employee_id))
         return result.scalars().first()
+
+    @classmethod
+    async def get_employee_by_name(self,session:AsyncSession,name:str):
+        """按姓名查员工，查不到返回None"""
+        return (await session.execute(select(Employee).where(Employee.name==name))).scalars().first()
