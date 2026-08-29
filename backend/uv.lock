@@ -361,8 +361,8 @@ wheels = [
 ]
 
 [[package]]
-name = "chat-hub"
-version = "0.1.0"
+name = "chat-hub-backend"
+version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiosqlite" },

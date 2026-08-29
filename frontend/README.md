@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Chat Hub 前端
 
-## Getting Started
+基于 Next.js 14 App Router、React 18 与 TypeScript 的企业 AI 对话工作台。支持智能体切换、SSE 流式回复、停止生成、多会话历史、本地会话恢复和移动端适配。
 
-First, run the development server:
+## 本地运行
+
+复制 `.env.example` 为 `.env.local`，按需设置后端地址，然后运行：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+默认通过 Next.js rewrite 将 `/api/v1/*` 转发到 `http://127.0.0.1:8000`，可通过 `BACKEND_ORIGIN` 修改。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 可用命令
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm dev        # 启动开发服务器
+pnpm build      # 生产构建
+pnpm start      # 运行生产构建
+pnpm typecheck  # 严格 TypeScript 检查
+```
 
-## Learn More
+## 接口约定
 
-To learn more about Next.js, take a look at the following resources:
+- `GET /api/v1/agents`：返回智能体列表。
+- `POST /api/v1/chat`：接收 `message`、`thread_id`、`agent_id`，返回 `token | error | end` 类型的 SSE 事件。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+浏览器会将多会话历史保存到 `chat-hub-session-history`，首次加载时兼容迁移旧的 `chat-hub-session`，并兼容旧版消息中的 `role: "ai"` 格式。历史只存在当前浏览器；`threadId` 对应的服务端上下文并不随之保存，后端重启或清理状态后，旧会话可能无法继续原有上下文。

@@ -1,7 +1,7 @@
 [project]
-name = "chat-hub"
-version = "0.1.0"
-description = "Add your description here"
+name = "chat-hub-backend"
+version = "0.2.0"
+description = "FastAPI backend for the Chat Hub multi-agent workspace"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
