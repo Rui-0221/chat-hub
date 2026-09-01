@@ -149,6 +149,31 @@ export default function Home() {
       await streamChat({ message: content, threadId: activeSession.threadId, agentId: selectedAgent.key, signal: controller.signal, onEvent: (event) => {
         if (requestRef.current?.id !== requestId) return;
         if (event.type === "token") updateMessages(sessionId, (current) => current.map((message) => message.id === assistantId ? { ...message, content: message.content + event.content } : message));
+        if (event.type === "reasoning") updateMessages(sessionId, (current) => current.map((message) => {
+          if (message.id !== assistantId) return message;
+          // 带 agent 归属的事件是子 agent 的思考：挂到对应步骤；否则是主管思考。
+          if (!event.agent) return { ...message, reasoning: (message.reasoning ?? "") + event.content };
+          const steps = [...(message.steps ?? [])];
+          for (let index = steps.length - 1; index >= 0; index -= 1) {
+            if (steps[index].agent === event.agent) {
+              steps[index] = { ...steps[index], thinking: (steps[index].thinking ?? "") + event.content };
+              return { ...message, steps };
+            }
+          }
+          return { ...message, steps: [...steps, { agent: event.agent, thinking: event.content }] };
+        }));
+        if (event.type === "step") updateMessages(sessionId, (current) => current.map((message) => message.id === assistantId ? { ...message, steps: [...(message.steps ?? []), { agent: event.agent }] } : message));
+        if (event.type === "agent_result") updateMessages(sessionId, (current) => current.map((message) => {
+          if (message.id !== assistantId) return message;
+          const steps = [...(message.steps ?? [])];
+          for (let index = steps.length - 1; index >= 0; index -= 1) {
+            if (steps[index].agent === event.agent && steps[index].result === undefined) {
+              steps[index] = { ...steps[index], result: event.content };
+              return { ...message, steps };
+            }
+          }
+          return { ...message, steps: [...steps, { agent: event.agent, result: event.content }] };
+        }));
         if (event.type === "error") throw new Error(event.message ?? event.content ?? "智能体生成失败");
       }});
     } catch (cause: unknown) {

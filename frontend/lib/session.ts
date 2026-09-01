@@ -23,10 +23,21 @@ function normalizeMessages(value: unknown): ChatMessage[] {
     const role = message.role === "ai" ? "assistant" : message.role;
     if ((role !== "user" && role !== "assistant") || typeof message.content !== "string") return [];
     if (role === "assistant" && !message.content.trim()) return [];
+    // 只保留 id/role/content/steps；reasoning（思考过程）不落入本地历史。
+    const steps = Array.isArray(message.steps) ? message.steps.flatMap((item): { agent: string; result?: string }[] => {
+      if (!item || typeof item !== "object") return [];
+      const step = item as Record<string, unknown>;
+      if (typeof step.agent !== "string" || !step.agent) return [];
+      return [{
+        agent: step.agent,
+        result: typeof step.result === "string" ? step.result : undefined,
+      }];
+    }) : undefined;
     return [{
       id: typeof message.id === "string" ? message.id : createId("restored"),
       role,
       content: message.content,
+      ...(steps?.length ? { steps } : {}),
     }];
   });
 }

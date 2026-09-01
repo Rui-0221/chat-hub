@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 from langchain_deepseek import ChatDeepSeek
 from langgraph.checkpoint.memory import MemorySaver
@@ -15,9 +15,43 @@ from app.core.config import settings
 from app.services.tools import get_employee_info, search_handbook
 
 
+class _ThinkingChatDeepSeek(ChatDeepSeek):
+    """开启 thinking mode 的 ChatDeepSeek。
+
+    DeepSeek thinking mode（实测）要求 assistant 消息里的 reasoning_content
+    在后续请求中原样回传，否则工具循环第二次调用模型时返回 400。
+    langchain-deepseek 1.1.0 只在接收路径把它捕获进 additional_kwargs，
+    发送路径不会输出该字段（langchain_openai 会丢弃），因此这里补上。
+    """
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        if isinstance(input_, list):
+            # 每条 assistant 消息都必须带 reasoning_content 字段：
+            # 值不齐时以空串兜底，否则 thinking mode 下 API 返回 400。
+            for message, payload_message in zip(input_, payload["messages"]):
+                if (
+                    isinstance(message, AIMessage)
+                    and payload_message.get("role") == "assistant"
+                ):
+                    payload_message["reasoning_content"] = (
+                        message.additional_kwargs.get("reasoning_content", "") or ""
+                    )
+        return payload
+
+
 @lru_cache(maxsize=1)
-def get_chat_model() -> BaseChatModel:
-    return ChatDeepSeek(model=settings.deepseek_model)
+def get_thinking_model() -> BaseChatModel:
+    """开启 DeepSeek thinking mode 的模型：流式响应会先返回 reasoning_content。
+
+    deepseek-chat 指向推理家族（服务端返回 deepseek-v4-flash），
+    thinking 由请求参数控制；reasoning_content 的回传由
+    _ThinkingChatDeepSeek 处理。
+    """
+    return _ThinkingChatDeepSeek(
+        model=settings.deepseek_model,
+        extra_body={"thinking": {"type": "enabled"}},
+    )
 
 
 def _build_oa_graph(model: BaseChatModel) -> CompiledStateGraph:
@@ -48,28 +82,30 @@ def _build_oa_graph(model: BaseChatModel) -> CompiledStateGraph:
     return builder.compile(checkpointer=MemorySaver())
 
 
-def _build_supervisor_graph(model: BaseChatModel) -> CompiledStateGraph:
+def _build_supervisor_graph(
+    thinking_model: BaseChatModel
+) -> CompiledStateGraph:
     math_agent = create_react_agent(
-        model=model,
+        model=thinking_model,
         prompt="你是数学专家，负责数学、计算和逻辑推理问题。",
         tools=[],
         name="math_agent",
     ).with_config(tags=["skip_stream"])
     code_agent = create_react_agent(
-        model=model,
+        model=thinking_model,
         prompt="你是编程专家，负责软件开发、调试和代码解释问题。",
         tools=[],
         name="code_agent",
     ).with_config(tags=["skip_stream"])
     general_agent = create_react_agent(
-        model=model,
+        model=thinking_model,
         prompt="你是通用助手，负责数学和编程之外的日常问题。",
         tools=[],
         name="general_agent",
     ).with_config(tags=["skip_stream"])
     supervisor = create_supervisor(
         agents=[math_agent, code_agent, general_agent],
-        model=model,
+        model=thinking_model,
         prompt=(
             "你是主管。请把数学问题交给 math_agent，把编程问题交给 code_agent，"
             "其余问题交给 general_agent。收到助手答案后，直接向用户给出清晰结论。"
@@ -83,10 +119,10 @@ def _build_supervisor_graph(model: BaseChatModel) -> CompiledStateGraph:
 
 @lru_cache(maxsize=1)
 def get_agent_graphs() -> dict[str, CompiledStateGraph]:
-    model = get_chat_model()
+    thinking_model = get_thinking_model()
     return {
-        "oa-assistant": _build_oa_graph(model),
-        "multi-agent-supervisor": _build_supervisor_graph(model),
+        "oa-assistant": _build_oa_graph(thinking_model),
+        "multi-agent-supervisor": _build_supervisor_graph(thinking_model),
     }
 
 

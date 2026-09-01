@@ -24,6 +24,23 @@ function parseEvent(rawEvent: string): ChatStreamEvent | null {
   if (event.type === "token" && typeof event.content === "string") {
     return { type: "token", content: event.content };
   }
+  if (event.type === "reasoning" && typeof event.content === "string") {
+    return {
+      type: "reasoning",
+      content: event.content,
+      ...(typeof event.agent === "string" ? { agent: event.agent } : {}),
+    };
+  }
+  if (event.type === "step" && typeof event.agent === "string") {
+    return { type: "step", agent: event.agent };
+  }
+  if (
+    event.type === "agent_result"
+    && typeof event.agent === "string"
+    && typeof event.content === "string"
+  ) {
+    return { type: "agent_result", agent: event.agent, content: event.content };
+  }
   if (event.type === "error") {
     return {
       type: "error",
